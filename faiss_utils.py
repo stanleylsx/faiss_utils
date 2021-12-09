@@ -9,8 +9,9 @@ import numpy as np
 
 
 class FaissUtils:
-    def __init__(self):
-        self.index_path = 'models/faiss_index/vectors.index'
+    def __init__(self, logger):
+        self.logger = logger
+        self.index_path = 'api/engines/models/faiss_index/vectors.index'
         # index_flat_l2、index_ivf_flat、index_ivf_pq
         self.method = 'index_ivf_flat'
         self.m = 4  # 每个向量分m段
@@ -77,6 +78,7 @@ class FaissUtils:
             index = self.index_ivf_pq(vectors)
         # 保存索引和加载索引
         faiss.write_index(index, self.index_path)
+        self.logger.info('save index successful.')
 
     def load_index(self):
         """
@@ -84,6 +86,7 @@ class FaissUtils:
         :return:
         """
         self.index = faiss.read_index(self.index_path)
+        self.logger.info('load index successful.')
 
     def get_query_result(self, query_vector, k):
         """
@@ -97,3 +100,4 @@ class FaissUtils:
         distance, index = self.index.search(vector, k)
         distance, index = list(distance[0]), list(index[0])
         return index, distance
+
