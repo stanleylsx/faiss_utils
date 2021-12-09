@@ -12,8 +12,6 @@ class FaissUtils:
     def __init__(self, logger):
         self.logger = logger
         self.index_path = 'api/engines/models/faiss_index/vectors.index'
-        # index_flat_l2、index_ivf_flat、index_ivf_pq
-        self.method = 'index_ivf_flat'
         self.m = 4  # 每个向量分m段
         self.dim = 200  # 向量维度
         self.nlist = 256  # 簇心的个数
@@ -64,15 +62,18 @@ class FaissUtils:
         index.nprobe = self.nprobe
         return index
 
-    def train_index(self, vectors):
+    def train_index(self, vectors, method):
         """
-        输入向量矩阵
+        训练向量索引
+        :param vectors:
+        :param method: index_flat_l2、index_ivf_flat、index_ivf_pq 三种方法
+        :return:
         """
         vectors = np.array(vectors).astype('float32')
         faiss.normalize_L2(vectors)  # 归一化
-        if self.method == 'index_flat_l2':
+        if method == 'index_flat_l2':
             index = self.index_flat_l2(vectors)
-        elif self.method == 'index_ivf_flat':
+        elif method == 'index_ivf_flat':
             index = self.index_ivf_flat(vectors)
         else:
             index = self.index_ivf_pq(vectors)
@@ -100,4 +101,3 @@ class FaissUtils:
         distance, index = self.index.search(vector, k)
         distance, index = list(distance[0]), list(index[0])
         return index, distance
-
