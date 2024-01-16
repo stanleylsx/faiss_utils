@@ -4,100 +4,110 @@
 # @Email : gzlishouxian@gmail.com
 # @File : faiss_utils.py 
 # @Software: PyCharm
+from loguru import logger
 import faiss
 import numpy as np
+import time
 
 
 class FaissUtils:
-    def __init__(self, logger):
+    def __init__(self, logger, dim, m=4, nlist=256, nprobe=10, use_gpu=False):
+        # m：PQ的子空间数量，用于IndexIVFPQ索引中
+        # nlist：nlist是聚类的数量，用于IndexIVFFlat和IndexIVFPQ等索引中
+        # nprobe：决定在执行查询操作时要检查多少个聚类或倒排列表，越大越慢但是效果越好。
         self.logger = logger
-        self.index_path = 'api/engines/models/faiss_index/vectors.index'
-        self.m = 4  # 每个向量分m段
-        self.dim = 200  # 向量维度
-        self.nlist = 256  # 簇心的个数
-        self.nprobe = 10  # 执行搜索的簇心数，增大nprobe可以得到与brute-force更为接近的结果，nprobe就是速度与精度的调节器
+        self.dim = dim
+        self.m = m
+        self.nlist = nlist
+        self.nprobe = nprobe
+        self.nbits = 8
         self.index = None
+        self.use_gpu = use_gpu
+        if use_gpu:
+            self.res = faiss.StandardGpuResources()
 
-    def index_flat_l2(self, vectors):
+    def create_index(self, vectors, texts, mids, index_type='ivf_flat', metric='ip'):
         """
-        暴力的(brute-force)精确搜索计算L2距离
-        :param vectors:
-        :return:
+        Create vector index.
         """
-        index = faiss.IndexFlatL2(self.dim)
-        index.add(vectors)
-        return index
+        if metric == 'l2':
+            metric = faiss.METRIC_L2
+        else:
+            metric = faiss.METRIC_INNER_PRODUCT
 
-    def index_ivf_flat(self, vectors):
-        """
-        倒排索引的办法
-        :param vectors:
-        :return:
-        """
-        quantizer = faiss.IndexFlatL2(self.dim)
-        # 定义量化器为点乘(内积)，归一化的向量点乘即cosine相似度（越大越好）
-        # quantizer = faiss.IndexFlatIP(self.dim)
+        self.logger.info('creating index...')
+        vectors = np.array(vectors).astype('float32')
+        if index_type == 'l2':
+            self.index = faiss.IndexFlatL2(self.dim)
+        elif index_type == 'ip':
+            self.index = faiss.IndexFlatIP(self.dim)
+        elif index_type == 'cosine':
+            faiss.normalize_L2(vectors)
+            self.index = faiss.IndexFlatIP(self.dim)
+        elif index_type == 'ivf_flat':
+            quantizer = faiss.IndexFlatL2(self.dim)
+            self.index = faiss.IndexIVFFlat(quantizer, self.dim, self.nlist, metric)
+        elif index_type == 'ivf_pq':
+            quantizer = faiss.IndexFlatL2(self.dim)
+            self.index = faiss.IndexIVFPQ(quantizer, self.dim, self.nlist, self.m, self.nbits, metric)
+        elif index_type == 'hnsw':
+            # 构建HNSW的时候，每个向量和多少个最近邻相连接。
+            self.index = faiss.IndexHNSWFlat(self.dim, 64, metric)
+            # efConstruction：在构建图的时候，每层查找多少个点。
+            self.index.hnsw.efConstruction = 64
+            # efSearch：在搜索的时候，每层查询多少个点。
+            self.index.hnsw.efSearch = 32
 
-        # faiss定义了两种衡量相似度的方法(metrics)
-        # faiss.METRIC_L2:欧式距离
-        # faiss.METRIC_INNER_PRODUCT:向量内积
-        index = faiss.IndexIVFFlat(quantizer, self.dim, self.nlist, faiss.METRIC_INNER_PRODUCT)
-        index.train(vectors)
-        index.add(vectors)
-        index.nprobe = self.nprobe
-        return index
+        self.index.nprobe = self.nprobe
 
-    def index_ivf_pq(self, vectors):
-        """
-        IndexIVFPQ索引可以用来压缩向量，具体的压缩算法就是PQ。
-        :param vectors:
-        :return:
-        """
-        quantizer = faiss.IndexFlatL2(self.dim)
-        # 定义量化器为点乘(内积)，归一化的向量点乘即cosine相似度（越大越好）
-        # quantizer = faiss.IndexFlatIP(self.dim)
-        index = faiss.IndexIVFPQ(quantizer, self.dim, self.nlist, self.m, 8)
-        index.train(vectors)
-        index.add(vectors)
-        index.nprobe = self.nprobe
-        return index
+        if self.use_gpu:
+            self.index = faiss.index_cpu_to_gpu(self.res, 0, self.index)
 
-    def train_index(self, vectors, method):
+        self.logger.info(f'if index is trained:{self.index.is_trained}')
+        if not self.index.is_trained:
+            self.logger.info('train index...')
+            self.index.train(vectors)
+        self.index.add(vectors)
+
+    def save_index(self, index_path, data_path='data.joblib'):
         """
-        训练向量索引
-        :param vectors:
-        :param method: index_flat_l2、index_ivf_flat、index_ivf_pq 三种方法
-        :return:
+        Save index.
+        """
+        faiss.write_index(self.index, index_path)
+
+    def load_index(self, index_path, data_path='data.joblib'):
+        """
+        Load index.
+        """
+        self.index = faiss.read_index(index_path)
+        if self.use_gpu:
+            self.index = faiss.index_cpu_to_gpu(self.res, 0, self.index)
+
+    def add_vectors(self, vectors):
+        """
+        Add new vectors to the existing index.
         """
         vectors = np.array(vectors).astype('float32')
-        faiss.normalize_L2(vectors)  # 归一化
-        if method == 'index_flat_l2':
-            index = self.index_flat_l2(vectors)
-        elif method == 'index_ivf_flat':
-            index = self.index_ivf_flat(vectors)
+        # only add vectors to a trained index
+        if self.index.is_trained:
+            self.index.add(vectors)
+            self.logger.info('add new vectors successful...')
         else:
-            index = self.index_ivf_pq(vectors)
-        # 保存索引和加载索引
-        faiss.write_index(index, self.index_path)
-        self.logger.info('save index successful.')
+            self.logger.error('index is not trained, cannot add vectors...')
 
-    def load_index(self):
+    def search(self, query_vector, k):
         """
-        加载索引
-        :return:
-        """
-        self.index = faiss.read_index(self.index_path)
-        self.logger.info('load index successful.')
-
-    def get_query_result(self, query_vector, k):
-        """
-        执行向量搜索
-        :param query_vector:
-        :param k:
-        :return:
+        Execute vector search.
         """
         vector = np.array([query_vector]).astype('float32')
+        start_time = time.time()
         faiss.normalize_L2(vector)
         distance, index = self.index.search(vector, k)
+        self.logger.info('Time consumption of search: %.3f(ms)' % ((time.time() - start_time) * 1000))
         distance, index = list(distance[0]), list(index[0])
         return index, distance
+
+
+if __name__ == '__main__':
+    faiss_utils = FaissUtils(logger, 768)
+
