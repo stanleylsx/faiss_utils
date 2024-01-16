@@ -22,6 +22,8 @@ class FaissUtils:
         self.nprobe = nprobe
         self.nbits = 8
         self.index = None
+        self.data_path = './data/data.joblib'
+        self.index_path = './data/faiss_index.pkl'
         self.use_gpu = use_gpu
         if use_gpu:
             self.res = faiss.StandardGpuResources()
@@ -71,19 +73,21 @@ class FaissUtils:
         self.index.add(vectors)
        self.logger.info('Time consumption of create index: %.3f(ms)' % ((time.time() - start_time) * 1000))
 
-    def save_index(self, index_path, data_path='data.joblib'):
+    def save_index(self):
         """
         Save index.
         """
-        faiss.write_index(self.index, index_path)
+        faiss.write_index(self.index, self.index_path)
+        joblib.dump((self.corresponding_texts, self.corresponding_mids), self.data_path)
 
-    def load_index(self, index_path, data_path='data.joblib'):
+    def load_index(self):
         """
         Load index.
         """
-        self.index = faiss.read_index(index_path)
+        self.index = faiss.read_index(self.index_path)
         if self.use_gpu:
             self.index = faiss.index_cpu_to_gpu(self.res, 0, self.index)
+        self.corresponding_texts, self.corresponding_mids = joblib.load(self.data_path)
 
     def add_vectors(self, vectors):
         """
