@@ -36,6 +36,7 @@ class FaissUtils:
             metric = faiss.METRIC_INNER_PRODUCT
 
         self.logger.info('creating index...')
+        start_time = time.time()
         vectors = np.array(vectors).astype('float32')
         if index_type == 'l2':
             self.index = faiss.IndexFlatL2(self.dim)
@@ -68,6 +69,7 @@ class FaissUtils:
             self.logger.info('train index...')
             self.index.train(vectors)
         self.index.add(vectors)
+       self.logger.info('Time consumption of create index: %.3f(ms)' % ((time.time() - start_time) * 1000))
 
     def save_index(self, index_path, data_path='data.joblib'):
         """
